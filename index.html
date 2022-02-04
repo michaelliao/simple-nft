@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Create EIP-1155 based NFT.">
+    <meta name="author" content="Michael Liao">
+
+    <title>Create NFT with EIP-1155</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.12/dist/vue.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ipfs-http-client-lite@0.3.0/dist/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.0.32/dist/ethers.umd.min.js"></script>
+
+    <script>
+        window.CONTRACT_ABI = '[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"account","type":"address"},{"indexed":true,"internalType":"address","name":"operator","type":"address"},{"indexed":false,"internalType":"bool","name":"approved","type":"bool"}],"name":"ApprovalForAll","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"operator","type":"address"},{"indexed":true,"internalType":"address","name":"from","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":false,"internalType":"uint256[]","name":"ids","type":"uint256[]"},{"indexed":false,"internalType":"uint256[]","name":"values","type":"uint256[]"}],"name":"TransferBatch","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"operator","type":"address"},{"indexed":true,"internalType":"address","name":"from","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":false,"internalType":"uint256","name":"id","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"value","type":"uint256"}],"name":"TransferSingle","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"string","name":"value","type":"string"},{"indexed":true,"internalType":"uint256","name":"id","type":"uint256"}],"name":"URI","type":"event"},{"inputs":[{"internalType":"address","name":"account","type":"address"},{"internalType":"uint256","name":"id","type":"uint256"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address[]","name":"accounts","type":"address[]"},{"internalType":"uint256[]","name":"ids","type":"uint256[]"}],"name":"balanceOfBatch","outputs":[{"internalType":"uint256[]","name":"","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"},{"internalType":"address","name":"operator","type":"address"}],"name":"isApprovedForAll","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"string","name":"metadataHash","type":"string"}],"name":"mint","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256[]","name":"ids","type":"uint256[]"},{"internalType":"uint256[]","name":"amounts","type":"uint256[]"},{"internalType":"bytes","name":"data","type":"bytes"}],"name":"safeBatchTransferFrom","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"id","type":"uint256"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"bytes","name":"data","type":"bytes"}],"name":"safeTransferFrom","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"operator","type":"address"},{"internalType":"bool","name":"approved","type":"bool"}],"name":"setApprovalForAll","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes4","name":"interfaceId","type":"bytes4"}],"name":"supportsInterface","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"id","type":"uint256"}],"name":"uri","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"}]';
+        window.TOPIC_TRANSFER = '0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62';
+        // TODO: change to your NFT contract address:
+        window.CHAINS = {
+            '1': ['Ethereum', 'https://etherscan.io', '0x0000000000000000000000000000000000000000'],
+            '4': ['Rinkeby Testnet', 'https://rinkeby.etherscan.io', '0x0000000000000000000000000000000000000000']
+        };
+
+        function base64ToBuffer(base64) {
+            let
+                binary_string = window.atob(base64),
+                len = binary_string.length,
+                bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binary_string.charCodeAt(i);
+            }
+            return bytes;
+        }
+
+        function getWeb3Provider() {
+            if (!window.web3Provider) {
+                if (!window.ethereum) {
+                    console.error("there is no web3 provider.");
+                    return null;
+                }
+                window.web3Provider = new ethers.providers.Web3Provider(window.ethereum, "any");
+            }
+            return window.web3Provider;
+        }
+
+        function showAlert(title, message) {
+            let m = $('#alertModal');
+            m.find('.x-title').text(title);
+            if (message.startsWith('<')) {
+                m.find('.x-message').html(message);
+            } else {
+                m.find('.x-message').text(message);
+            }
+            let myModal = new bootstrap.Modal(m.get(0), { backdrop: 'static', keyboard: false });
+            myModal.show();
+        }
+
+        function showInfo(title, message) {
+            let m = $('#infoModal');
+            m.find('.x-title').text(title);
+            if (message.startsWith('<')) {
+                m.find('.x-message').html(message);
+            } else {
+                m.find('.x-message').text(message);
+            }
+            let myModal = new bootstrap.Modal(m.get(0), { backdrop: 'static', keyboard: false });
+            myModal.show();
+        }
+
+        function showLoading(title, message) {
+            let m = $('#loadingModal');
+            let myModal = new bootstrap.Modal(m.get(0), { backdrop: 'static', keyboard: false });
+            let obj = {
+                setTitle: (t) => {
+                    m.find('.x-title').text(t);
+                },
+                setMessage: (t) => {
+                    m.find('.x-message').text(t);
+                },
+                close: () => {
+                    setTimeout(function () {
+                        myModal.hide();
+                    }, 500);
+                }
+            }
+            obj.setTitle(title);
+            obj.setMessage(message);
+            myModal.show();
+            return obj;
+        }
+
+        function translateError(err) {
+            window.err = err;
+            if (typeof (err) === 'string') {
+                return err;
+            }
+            if (err.error && err.error.code && err.error.message) {
+                return `Error (${err.error.code}): ${err.error.message}`;
+            }
+            if (err.code && err.message) {
+                return `Error (${err.code}): ${err.message}`;
+            }
+            return err.message || err.toString();
+        }
+
+        function init() {
+            console.log('init vue...');
+            window.vm = new Vue({
+                el: '#vm',
+                data: {
+                    account: null,
+                    chainId: 0,
+                    // nft data:
+                    imageData: '', // base64 data
+                    imageFileName: '',
+                    name: '',
+                    description: '',
+                    amount: 1,
+                    link: 'https://',
+                    properties: [
+                        { trait_type: '', value: '' }
+                    ]
+                },
+                computed: {
+                    ready: function () {
+                        return this.account && this.chainId > 0;
+                    },
+                    networkName: function () {
+                        if (this.account) {
+                            let cs = window.CHAINS[this.chainId];
+                            if (cs) {
+                                return cs[0];
+                            }
+                            return 'Unsupported Chain (0x' + this.chainId.toString(16) + ')';
+                        }
+                        return 'Not connected';
+                    },
+                    wrongNetwork: function () {
+                        return this.account && !window.CHAINS[this.chainId];
+                    }
+                },
+                methods: {
+                    abbrAddress: function (addr) {
+                        if (!addr) {
+                            return '';
+                        }
+                        let s = addr.toString();
+                        if (s.indexOf('0x') === 0 && s.length === 42) {
+                            let addr = ethers.utils.getAddress(s.substring(0));
+                            return addr.substring(0, 6) + '...' + addr.substring(38);
+                        }
+                        return s;
+                    },
+                    gotoScanUrlForAddress: function (addr) {
+                        let cs = window.CHAINS[this.chainId];
+                        if (cs) {
+                            window.open(cs[1] + '/address/' + (addr || this.account));
+                        } else {
+                            console.error('Invalid chain id: ', this.chainId);
+                        }
+                    },
+                    getScanUrlForToken: function (tokenId) {
+                        let cs = window.CHAINS[this.chainId];
+                        if (cs) {
+                            return cs[1] + '/token/' + cs[2] + '?a=' + tokenId;
+                        } else {
+                            return 'about:blank';
+                        }
+                    },
+                    getContractAddress: function () {
+                        let cs = window.CHAINS[this.chainId];
+                        if (cs) {
+                            return cs[2];
+                        } else {
+                            return '0x0000000000000000000000000000000000000000';
+                        }
+                    },
+                    imageChanged: function () {
+                        let
+                            that = this,
+                            fpath = $('#imageFile').val(),
+                            pos = fpath.lastIndexOf('.');
+                        if (pos === -1) {
+                            that.imageData = '';
+                            that.imageFileName = '';
+                            $('#imagePreview').css('background-image', 'none');
+                            return;
+                        }
+                        let
+                            fname = 'file' + fpath.substring(pos),
+                            reader = new FileReader();
+                        try {
+                            let file = $('#imageFile').get(0).files[0];
+                            reader.onloadend = function (e) {
+                                let
+                                    data = e.target.result,
+                                    index = data.indexOf(';base64,');
+                                if ((index >= 0) && (index < 100)) {
+                                    that.imageData = data.substring(index + 8);
+                                    that.imageFileName = fname;
+                                    $('#imagePreview').css('background-image', 'url(' + data + ')');
+                                } else {
+                                    that.imageData = '';
+                                    that.imageFileName = '';
+                                    $('#imagePreview').css('background-image', 'none');
+                                    showAlert('Browser does not support data URL!');
+                                }
+                            };
+                            reader.readAsDataURL(file);
+                        } catch (e) {
+                            showAlert('Error when process file: ' + e);
+                        }
+                    },
+                    addProperty: function () {
+                        this.properties.push({ trait_type: '', value: '' });
+                    },
+                    removeProperty: function (prop) {
+                        let index = this.properties.indexOf(prop);
+                        this.properties.splice(index, 1);
+                    },
+                    mint: async function () {
+                        if (!this.ready) {
+                            return showAlert('Error', 'Please connect MetaMask wallet first.');
+                        }
+                        if (this.wrongNetwork) {
+                            return showAlert('Error', 'Please switch to supported network in MetaMask wallet.');
+                        }
+                        // validate:
+                        if (this.imageData === '') {
+                            return showAlert('Error', 'Please select image.');
+                        }
+                        if (this.name.trim() === '') {
+                            return showAlert('Error', 'NFT name is empty.');
+                        }
+                        this.amount = parseInt(this.amount);
+                        if (isNaN(this.amount) || !Number.isInteger(this.amount) || this.amount < 1 || this.amount > 100000) {
+                            return showAlert('Error', 'NFT amount is invalid.');
+                        }
+                        if (!this.link.trim().startsWith('https://') && !this.link.trim().startsWith('http://')) {
+                            return showAlert('Error', 'NFT link is invalid.');
+                        }
+                        // check metadata:
+                        let props = [];
+                        for (let i = 0; i < this.properties.length; i++) {
+                            let
+                                p = this.properties[i],
+                                k = p.trait_type.trim(),
+                                v = p.value.trim();
+                            if (k === '' && v === '') {
+                                continue;
+                            }
+                            if (k === '' && v !== '') {
+                                return showAlert('Error', 'Missing property name for value: ' + v);
+                            }
+                            props.push({
+                                'trait_type': k,
+                                'value': v
+                            });
+                        }
+                        let metadata = {
+                            name: this.name.trim(),
+                            description: this.description.trim(),
+                            external_url: this.link.trim(),
+                            image: '',
+                            attributes: props
+                        };
+                        let loading = showLoading('Mint NFT', 'Upload image to IPFS...');
+                        try {
+                            // upload image:
+                            let
+                                ipfs = window.IpfsHttpClientLite('https://ipfs.infura.io:5001'),
+                                data = base64ToBuffer(this.imageData);
+                            let
+                                resp = await ipfs.add(data),
+                                hash = resp[0] && resp[0].hash;
+                            console.log(resp);
+                            if (!hash) {
+                                throw 'Invalid IPFS result when upload image!';
+                            }
+                            metadata.image = 'https://ipfs.infura.io/ipfs/' + hash + '?filename=' + this.imageFileName;
+                            console.log(metadata.image);
+                            let jsonFile = JSON.stringify(metadata, null, '  ');
+                            // upload metadata:
+                            loading.setMessage('Upload metadata to IPFS...');
+                            resp = await ipfs.add(jsonFile);
+                            hash = resp[0] && resp[0].hash;
+                            if (!hash) {
+                                throw 'Invalid IPFS result when upload metadata!';
+                            }
+                            console.log('https://ipfs.infura.io/ipfs/' + hash + '?filename=metadata.json');
+
+                            loading.setMessage('Prepare NFT mint transaction...');
+                            if (!this.ready || this.wrongNetwork) {
+                                throw 'Wallet not ready!';
+                            }
+                            let contract = new ethers.Contract(this.getContractAddress(), window.CONTRACT_ABI, window.getWeb3Provider().getSigner());
+                            loading.setMessage('Please confirm transaction in wallet...');
+                            let tx = await contract.mint(this.amount, hash);
+                            loading.setMessage('Please wait for block confirms...');
+                            await tx.wait(1);
+                            loading.setMessage('Parse transaction receipt...');
+                            let txReceipt = await window.getWeb3Provider().getTransactionReceipt(tx.hash);
+                            console.log(txReceipt);
+                            let tokenId = null, amount = 0;
+                            for (let i = 0; i < txReceipt.logs.length; i++) {
+                                let log = txReceipt.logs[i];
+                                console.log('log:');
+                                console.log(log);
+                                if (log.topics[0] === window.TOPIC_TRANSFER) {
+                                    tokenId = parseInt(log.data.substring(2, 64 + 2));
+                                    amount = parseInt(log.data.substring(64 + 2, 128 + 2));
+                                    console.log('Found log: token id = ' + tokenId + ', amount = ' + amount);
+                                    break;
+                                }
+                            }
+                            if (tokenId === null) {
+                                throw 'Token ID not found in transaction receipt.';
+                            }
+                            let url = this.getScanUrlForToken(tokenId);
+                            loading.close();
+                            showInfo('Success', '<p>NFT have been minted successfully!</p><p>Visit <a href="' + url + '" target="_blank">transaction</a> for details.</p>');
+                        } catch (e) {
+                            console.error(e);
+                            loading.close();
+                            showAlert('Error', translateError(e));
+                        }
+                    },
+                    accountChanged: function (accounts) {
+                        console.log('wallet account changed:', accounts.length === 0 ? null : accounts[0]);
+                        if (accounts.length === 0) {
+                            this.disconnected();
+                        } else {
+                            this.account = accounts[0];
+                            document.cookie = '__account__=' + this.account + ';max-age=1296000';
+                        }
+                    },
+                    disconnected: async function () {
+                        console.warn('wallet disconnected.');
+                        this.account = null;
+                    },
+                    chainChanged: function (chainId) {
+                        console.log('wallet chainId changed: ' + chainId + ' = ' + parseInt(chainId, 16));
+                        this.chainId = parseInt(chainId, 16);
+                    },
+                    connectWallet: async function () {
+                        console.log('try connect wallet...');
+                        if (window.getWeb3Provider() === null) {
+                            console.error('there is no web3 provider.');
+                            return false;
+                        }
+                        try {
+                            this.accountChanged(await window.ethereum.request({
+                                method: 'eth_requestAccounts',
+                            }));
+                            this.chainChanged(await window.ethereum.request({
+                                method: 'eth_chainId'
+                            }));
+                            window.ethereum.on('disconnect', this.disconnected);
+                            window.ethereum.on('accountsChanged', this.accountChanged);
+                            window.ethereum.on('chainChanged', this.chainChanged);
+                        } catch (e) {
+                            console.error('could not get a wallet connection.', e);
+                            return false;
+                        }
+                        console.log('wallet connected.');
+                        return true;
+                    }
+                }
+            });
+        }
+
+        $(function () {
+            init();
+        });
+    </script>
+</head>
+
+<body>
+    <!-- Loading Modal -->
+    <div id="loadingModal" class="modal fade" role="dialog" aria-hidden="true" aria-labelledby="loadingLabel">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header align-items-center d-flex">
+                    <h4 class="modal-title x-title" id="loadingLabel">&nbsp;</h4>
+                </div>
+                <div class="modal-body">
+                    <div class="float-start">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                    <div class="ms-5 ps-4 float-none">
+                        <p class="x-message">&nbsp;</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Modal -->
+    <div id="alertModal" class="modal fade" role="dialog" aria-hidden="true" aria-labelledby="alertLabel">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header align-items-center d-flex">
+                    <h4 class="modal-title x-title" id="alertLabel">&nbsp;</h4>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="float-start">
+                        <i class="fs-2 text-danger bi bi-exclamation-triangle"></i>
+                    </div>
+                    <div class="ms-5 ps-4 float-none">
+                        <p class="x-message">&nbsp;</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-primary" data-bs-dismiss="modal" aria-label="Close">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Info Modal -->
+    <div id="infoModal" class="modal fade" role="dialog" aria-hidden="true" aria-labelledby="infoLabel">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header align-items-center d-flex">
+                    <h4 class="modal-title x-title" id="infoLabel">&nbsp;</h4>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="float-start">
+                        <i class="fs-2 bi bi-info-circle"></i>
+                    </div>
+                    <div class="ms-5 ps-4 float-none">
+                        <p class="x-message">&nbsp;</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-primary" data-bs-dismiss="modal" aria-label="Close">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="vm">
+        <nav class="navbar navbar-expand-lg navbar-light bg-light" style="position:fixed; top:0; left:0; right:0;">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="#0"><i class="bi bi-gear-wide-connected"></i> Create NFT</a>
+
+                <ul id="wallet" class="mr-2 navbar-nav navbar-right-wrap" style="flex-direction: row !important;">
+                    <li class="nav-item">
+                        <span class="nav-link">
+                            <i v-if="!wrongNetwork" class="bi bi-globe"></i>
+                            <i v-if="wrongNetwork" class="bi bi-exclamation-triangle text-danger"></i>
+                            <span v-text="networkName"></span></span>
+                    </li>
+                    <li v-if="account===null" class="nav-item">
+                        <button v-on:click="connectWallet" type="button" class="btn btn-primary">Connect Wallet</button>
+                    </li>
+                    <li v-if="account!==null" class="nav-item">
+                        <a href="#0" class="nav-link" v-on:click="gotoScanUrlForAddress()"><i class="bi bi-wallet"></i>
+                            <span v-text="abbrAddress(account)"></span> <i class="fe fe-external-link"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+
+        <div class="container-fluid" style="padding-top: 70px; padding-left: 3em; padding-right: 3em;">
+            <div class="row">
+                <div class="col">
+                    <h1>Create EIP-1155 based NFT</h1>
+                    <p>This tool helps you create EIP-1155 based NFT.</p>
+                    <hr />
+                </div>
+            </div>
+            <div class="row">
+                <div class="col">
+                    <form action="#0" onsubmit="return false">
+                        <div class="mb-3">
+                            <label class="form-label">NFT image preview:</label>
+                            <div id="imagePreview"
+                                style="width: 100%; height: 360px; background-repeat: no-repeat; background-position: center center; background-size: contain;">
+                            </div>
+                            <div class="form-text">Image preivew before upload.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="imageFile" class="form-label">NFT image:</label>
+                            <input v-on:change="imageChanged()" id="imageFile" type="file" class="form-control-file"
+                                accept="image/jpeg,image/png,image/gif,image/svg+xml">
+                            <div class="form-text">Select image files for upload.</div>
+                        </div>
+                        <div class="mb-6">
+                            <h3>NFT Information</h3>
+                        </div>
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Name:</label>
+                            <input v-model="name" id="name" length="100" class="form-control">
+                            <div class="form-text">NFT name.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Description:</label>
+                            <input v-model="description" id="description" length="1000" class="form-control">
+                            <div class="form-text">NFT description.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="amount" class="form-label">Amount:</label>
+                            <input v-model.number="amount" id="amount" type="number" max="100000" class="form-control">
+                            <div class="form-text">NFT amount.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="link" class="form-label">Link:</label>
+                            <input v-model="link" id="link" length="1000" class="form-control">
+                            <div class="form-text">Link to NFT website.</div>
+                        </div>
+                        <div class="mb-6">
+                            <h3>NFT Properties</h3>
+                        </div>
+                        <div class="mb-3">
+                            <label for="x" class="form-label">Add multiple properties by define property name and
+                                property value:</label>
+                            <div v-for="prop in properties" class="row mb-3">
+                                <div class="col-4 col-sm-4 col-md-4 col-lg-4 col-xl-4">
+                                    <input v-model="prop.trait_type" class="form-control" placeholder="Property Name">
+                                </div>
+                                <div class="col-4 col-sm-5 col-md-6 col-lg-6 col-xl-7">
+                                    <input v-model="prop.value" class="form-control" placeholder="Property Value">
+                                </div>
+                                <div class="col-4 col-sm-3 col-md-2 col-lg-2 col-xl-1">
+                                    <button v-on:click="removeProperty(prop)" type="button"
+                                        class="btn btn-danger">Remove</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <button v-on:click="addProperty(prop)" type="button" class="btn btn-link">Add
+                                Property</button>
+                        </div>
+                        <div class="mb-3">
+                            <button v-on:click="mint" type="button" class="btn btn-primary btn-lg">Create NFT</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bd-footer py-5 mt-5 bg-light">
+        <div class="container">
+            <div class="row">
+                <div class="col-12">
+                    <div class="mb-4"><i class="bi bi-gear-wide-connected"></i> EIP-1155 based NFT tool &copy;2022</div>
+                    <ul class="list-unstyled small text-muted">
+                        <li class="mb-2">Designed and built by Michael Liao.</li>
+                        <li class="mb-2">Code licensed <a href="https://michaelliao.github.io/simple-nft/LICENSE.txt"
+                                target="_blank">GPLv3</a></li>
+                        <li class="mb-2">Last updated: 28 Jan 2022</li>
+                        <li class="mb-2">
+                            <a target="_blank" class="me-2" href="https://github.com/michaelliao/simple-nft">Github</a>
+                            <a target="_blank" class="me-2" href="https://twitter.com/liaoxuefeng">Twitter</a>
+                            <a target="_blank" class="me-2" href="https://eips.ethereum.org/EIPS/eip-1155">EIP-1155</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>
